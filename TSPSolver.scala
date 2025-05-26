@@ -1,4 +1,5 @@
 import scala.math._
+import scala.collection.mutable
 import scala.io.Source
 import scala.util.Try
 
@@ -26,6 +27,9 @@ object TSPSolver {
         val solver = new PathReconstruction(dist, startNode)
         val (minCost, path) = solver.solve()
 
+        println("Distance matrix:")
+        dist.foreach(row => println(row.mkString(" ")))
+        println("")
         println(s"Minimum cost: $minCost")
         println(s"Path: ${path.mkString(" -> ")}")
     }
@@ -37,45 +41,53 @@ class PathReconstruction(dist: Array[Array[Int]], start: Int) {
     require(start >= 1 && start <= n, s"Start node must be in range 1 to $n.")
 
     val INF = Int.MaxValue / 2
-    val dp = Array.fill(1 << n, n)(INF)
-    val prev = Array.fill(1 << n, n)(-1)
+    val dp = mutable.Map[(Set[Int], Int), Int]()
+    val prev = mutable.Map[(Set[Int], Int), Int]()
 
     def solve(): (Int, List[Int]) = {
-        // Base case: from start0 to all others
-        for (i <- 0 until n if i != start0) {
-            val mask = 1 << start0
-            dp(mask | (1 << i))(i) = dist(start0)(i)
-            prev(mask | (1 << i))(i) = start0
+        val allNodes = (0 until n).toSet
+
+        // Base case: from start0 to i
+        for (i <- 0 until n if i != start0) { // Loop over all nodes except start0
+            val visited = Set(start0, i)
+            dp((visited, i)) = dist(start0)(i)
+            prev((visited, i)) = start0
         }
 
-        for (mask <- 0 until (1 << n)) {
-            for (u <- 0 until n if (mask & (1 << u)) != 0) {
-                val prevMask = mask ^ (1 << u)
-                for (v <- 0 until n if (v != u && (mask & (1 << v)) != 0)) {
-                val newCost = dp(prevMask)(v) + dist(v)(u)
-                if (newCost < dp(mask)(u)) {
-                    dp(mask)(u) = newCost
-                    prev(mask)(u) = v
-                }
-                }
+        // Iterate over increasing sizes of visited sets
+        for (size <- 3 to n) { // Start from 3, because size 2 was covered in base case
+            for {
+                visited <- allNodes.subsets(size) if visited.contains(start0)
+                current <- visited if current != start0
+            } {
+                val previousVisited = visited - current
+                val (cost, pred) = previousVisited // Get minimum
+                    .filter(_ != current)
+                    .map(prevNode => (
+                        dp.getOrElse((previousVisited, prevNode), INF) + dist(prevNode)(current),
+                        prevNode
+                    ))
+                    .minBy(_._1)
+
+                dp((visited, current)) = cost
+                prev((visited, current)) = pred
             }
         }
 
-        val fullMask = (1 << n) - 1
-        val (minCost, lastNode) = (0 until n)
-            .filter(_ != start0)
-            .map(i => (dp(fullMask)(i) + dist(i)(start0), i))
+        val fullVisited = allNodes
+        val (minCost, lastNode) = (allNodes - start0)
+            .map(i => (dp((fullVisited, i)) + dist(i)(start0), i))
             .minBy(_._1)
 
-        val path = reconstructPath(fullMask, lastNode)
-        (minCost, ((start0 :: path) :+ start0).map(_ + 1)) // +1 to convert to 1-based
+        val path = reconstructPath(fullVisited, lastNode)
+        (minCost, ((start0 :: path) :+ start0).map(_ + 1)) // RETURN
     }
 
-    def reconstructPath(mask: Int, last: Int): List[Int] = {
-        if (mask == ((1 << start0) | (1 << last))) List(last)
+    def reconstructPath(visited: Set[Int], last: Int): List[Int] = {
+        if (visited == Set(start0, last)) List(last)
         else {
-            val prevNode = prev(mask)(last)
-            reconstructPath(mask ^ (1 << last), prevNode) :+ last
+            val pred = prev((visited, last))
+            reconstructPath(visited - last, pred) :+ last
         }
     }
 }
